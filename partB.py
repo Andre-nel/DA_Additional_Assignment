@@ -66,6 +66,7 @@ def preprocess_data(columnToClean: str, cleanedColumnName: str, selected_subject
 selected_subjects = ["DB", "NI", "CR", "CV"]
 columnToClean='combined_text'
 cleanedColumnName='cleaned'
+numClusters = len(selected_subjects)
 
 # Load and preprocess data
 # filtered_data = preprocess_data(columnToClean=columnToClean,
@@ -82,59 +83,75 @@ true_labels = label_encoder.fit_transform(filtered_data['Subject_area'])
 # Initialize the TF-IDF vectorizer
 vectorizer = TfidfVectorizer(sublinear_tf=True, min_df=2, max_df=0.95)
 
-X = vectorizer.fit_transform(filtered_data[cleanedColumnName])
+X_tfidf = vectorizer.fit_transform(filtered_data[cleanedColumnName])
 
-# Initialize KMeans clustering with 3 clusters
-kmeans = KMeans(n_clusters=4, random_state=42)
-# Fit the model
-kmeans.fit(X)
-# Store cluster labels in a variable
-clusters = kmeans.labels_
+from utils import fit_and_evaluate
 
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D  # Import for 3D plotting
-from sklearn.decomposition import PCA
-
-# Initialize PCA with 3 components
-pca = PCA(n_components=3, random_state=42)
-pca_vecs = pca.fit_transform(X.toarray())
-x0 = pca_vecs[:, 0]
-x1 = pca_vecs[:, 1]
-x2 = pca_vecs[:, 2]
-
-filtered_data['cluster'] = clusters
-filtered_data['x0'] = x0
-filtered_data['x1'] = x1
-filtered_data['x2'] = x2
-
-# Create a 3D scatter plot
-fig = plt.figure(figsize=(12, 7))
-ax = fig.add_subplot(111, projection='3d')  # Create a 3D axis
-
-# Set title and axis labels
-ax.set_title("3D PCA Plot", fontsize=18)
-ax.set_xlabel("X0", fontsize=16)
-ax.set_ylabel("X1", fontsize=16)
-ax.set_zlabel("X2", fontsize=16)
-
-# Create a 3D scatter plot with cluster coloring
-scatter = ax.scatter(
-    filtered_data['x0'],
-    filtered_data['x1'],
-    filtered_data['x2'],
-    c=filtered_data['cluster']
+kmeans = KMeans(
+    n_clusters=numClusters,
+    max_iter=100,
+    n_init=5,
 )
 
-# Add a color bar for cluster mapping
-plt.colorbar(scatter, label='Cluster')
-plt.show()
-
-from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
-
-ari_score = adjusted_rand_score(true_labels, filtered_data['cluster'])
-nmi_score = normalized_mutual_info_score(true_labels, filtered_data['cluster'])
-
-print(f"Adjusted Rand Index (ARI): {ari_score}")
-print(f"Normalized Mutual Information (NMI): {nmi_score}")
+fit_and_evaluate(kmeans, X_tfidf, labels=true_labels,
+                 name="KMeans\non tf-idf vectors")
 
 a = 1
+
+"""
+clustering done in 0.17 ± 0.11 s
+Homogeneity: 0.538 ± 0.014
+Completeness: 0.530 ± 0.011
+V-measure: 0.534 ± 0.012
+Adjusted Rand-Index: 0.479 ± 0.022
+Normalized Mutual Info: 0.534 ± 0.012
+Silhouette Coefficient: 0.008 ± 0.000
+"""
+
+from sklearn.decomposition import TruncatedSVD
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import Normalizer
+from time import time
+
+lsa = make_pipeline(TruncatedSVD(n_components=100), Normalizer(copy=False))
+t0 = time()
+X_lsa = lsa.fit_transform(X_tfidf)
+explained_variance = lsa[0].explained_variance_ratio_.sum()
+
+print(f"LSA done in {time() - t0:.3f} s")
+print(f"Explained variance of the SVD step: {explained_variance * 100:.1f}%")
+
+kmeans = KMeans(
+    n_clusters=numClusters,
+    max_iter=100,
+    n_init=1,
+)
+
+fit_and_evaluate(kmeans, X_lsa, labels=true_labels,
+                 name="KMeans\nwith LSA on tf-idf vectors")
+"""
+clustering done in 0.02 ± 0.00 s 
+Homogeneity: 0.560 ± 0.019
+Completeness: 0.546 ± 0.022
+V-measure: 0.553 ± 0.020
+Adjusted Rand-Index: 0.522 ± 0.025
+Normalized Mutual Info: 0.553 ± 0.020
+Silhouette Coefficient: 0.039 ± 0.000
+"""
+
+original_space_centroids = lsa[0].inverse_transform(kmeans.cluster_centers_)
+order_centroids = original_space_centroids.argsort()[:, ::-1]
+terms = vectorizer.get_feature_names_out()
+
+for i in range(numClusters):
+    print(f"Cluster {i}: ", end="")
+    for ind in order_centroids[i, :10]:
+        print(f"{terms[ind]} ", end="")
+    print()
+
+"""
+Cluster 0: wireless network networks mobile performance access throughput communication nodes paper
+Cluster 1: data security web based query privacy xml paper information users
+Cluster 2: image images learning deep method visual training data object using
+Cluster 3: sensor wireless networks energy wsns nodes network wsn routing protocol
+"""
