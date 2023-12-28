@@ -1,15 +1,20 @@
 import pandas as pd
-import numpy as np
 import re
 import nltk
 from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
-from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score, silhouette_score
+from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+from datetime import datetime
+
+# Load stopwords once
+nltk.download('stopwords')
+nltk.download('punkt')
+english_stopwords = set(stopwords.words('english'))
 
 
 # Read the CSV file
@@ -45,7 +50,7 @@ def preprocess_data(columnToClean: str, cleanedColumnName: str, selected_subject
             str: Preprocessed text.
         """
         text = re.sub(r"http\S+", "", text)  # Remove links
-        text = re.sub("[^A-Za-z]+", " ", text)  # Remove special characters and numbers
+        # text = re.sub("[^A-Za-z]+", " ", text)  # Remove special characters and numbers
         if remove_stopwords:
             tokens = nltk.word_tokenize(text)  # Tokenize
             tokens = [w for w in tokens if not w.lower() in stopwords.words("english")]  # Remove stopwords
@@ -58,7 +63,10 @@ def preprocess_data(columnToClean: str, cleanedColumnName: str, selected_subject
         lambda x: preprocess_text(x, remove_stopwords=True))
 
     # Save the filtered DataFrame to a CSV file
-    filtered_data.to_csv('filtered_data.csv', index=False)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"filtered_data_{timestamp}.csv"
+
+    filtered_data.to_csv(filename, index=False)
 
     return filtered_data
 
@@ -68,12 +76,12 @@ columnToClean='combined_text'
 cleanedColumnName='cleaned'
 numClusters = len(selected_subjects)
 
-# Load and preprocess data
-# filtered_data = preprocess_data(columnToClean=columnToClean,
-#                                 cleanedColumnName=cleanedColumnName,
-#                                 selected_subjects=selected_subjects)
+# Preprocess data
+filtered_data = preprocess_data(columnToClean=columnToClean,
+                                cleanedColumnName=cleanedColumnName,
+                                selected_subjects=selected_subjects)
 
-filtered_data = pd.read_csv('C:/Users/Jakne/Desktop/Andre/DA_Additional_Assignment/filtered_data.csv')
+# filtered_data = pd.read_csv('C:/Users/Jakne/Desktop/Andre/DA_Additional_Assignment/filtered_data.csv')
 
 from sklearn.preprocessing import LabelEncoder
 
@@ -81,32 +89,11 @@ label_encoder = LabelEncoder()
 true_labels = label_encoder.fit_transform(filtered_data['Subject_area'])
 
 # Initialize the TF-IDF vectorizer
-vectorizer = TfidfVectorizer(sublinear_tf=True, min_df=2, max_df=0.95)
+vectorizer = TfidfVectorizer(sublinear_tf=True, min_df=5, max_df=0.80)
 
 X_tfidf = vectorizer.fit_transform(filtered_data[cleanedColumnName])
 
-from utils import fit_and_evaluate
-
-kmeans = KMeans(
-    n_clusters=numClusters,
-    max_iter=100,
-    n_init=5,
-)
-
-fit_and_evaluate(kmeans, X_tfidf, labels=true_labels,
-                 name="KMeans\non tf-idf vectors")
-
-a = 1
-
-"""
-clustering done in 0.17 ± 0.11 s
-Homogeneity: 0.538 ± 0.014
-Completeness: 0.530 ± 0.011
-V-measure: 0.534 ± 0.012
-Adjusted Rand-Index: 0.479 ± 0.022
-Normalized Mutual Info: 0.534 ± 0.012
-Silhouette Coefficient: 0.008 ± 0.000
-"""
+from utils import fit_and_evaluate_km, fitAndEvaluateGM, printGMClusterTerms
 
 from sklearn.decomposition import TruncatedSVD
 from sklearn.pipeline import make_pipeline
@@ -121,37 +108,36 @@ explained_variance = lsa[0].explained_variance_ratio_.sum()
 print(f"LSA done in {time() - t0:.3f} s")
 print(f"Explained variance of the SVD step: {explained_variance * 100:.1f}%")
 
-kmeans = KMeans(
-    n_clusters=numClusters,
+# kmeans = KMeans(
+#     n_clusters=numClusters,
+#     max_iter=100,
+#     n_init=1,
+# )
+
+gm = GaussianMixture(
+    n_components=numClusters,
     max_iter=100,
-    n_init=1,
+    n_init=30,
 )
 
-fit_and_evaluate(kmeans, X_lsa, labels=true_labels,
-                 name="KMeans\nwith LSA on tf-idf vectors")
+fitAndEvaluateGM(gm, X_lsa, labels=true_labels,
+                 name="gm\nwith LSA on tf-idf vectors")
 """
-clustering done in 0.02 ± 0.00 s 
-Homogeneity: 0.560 ± 0.019
-Completeness: 0.546 ± 0.022
-V-measure: 0.553 ± 0.020
-Adjusted Rand-Index: 0.522 ± 0.025
-Normalized Mutual Info: 0.553 ± 0.020
-Silhouette Coefficient: 0.039 ± 0.000
+clustering done in 2.07 ± 0.27 s 
+Homogeneity: 0.628 ± 0.021
+Completeness: 0.625 ± 0.018
+V-measure: 0.626 ± 0.020
+Adjusted Rand-Index: 0.655 ± 0.026
+Normalized Mutual Info: 0.626 ± 0.020
+Silhouette Coefficient: 0.043 ± 0.001
 """
 
-original_space_centroids = lsa[0].inverse_transform(kmeans.cluster_centers_)
-order_centroids = original_space_centroids.argsort()[:, ::-1]
-terms = vectorizer.get_feature_names_out()
+printGMClusterTerms(lsa, gm, vectorizer, numClusters)
 
-for i in range(numClusters):
-    print(f"Cluster {i}: ", end="")
-    for ind in order_centroids[i, :10]:
-        print(f"{terms[ind]} ", end="")
-    print()
 
 """
-Cluster 0: wireless network networks mobile performance access throughput communication nodes paper
-Cluster 1: data security web based query privacy xml paper information users
-Cluster 2: image images learning deep method visual training data object using
-Cluster 3: sensor wireless networks energy wsns nodes network wsn routing protocol
+Cluster 0: query data xml queries database problem algorithms time study based
+Cluster 1: image images learning deep method visual training data using methods
+Cluster 2: security attacks web privacy data paper based system secure users
+Cluster 3: wireless networks network sensor nodes energy routing performance power protocol
 """
