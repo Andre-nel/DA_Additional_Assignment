@@ -49,6 +49,8 @@ def preprocess_data(columnToClean: str, cleanedColumnName: str, selected_subject
         Returns:
             str: Preprocessed text.
         """
+        # Lemmentization did not improve the results
+
         text = re.sub(r"http\S+", "", text)  # Remove links
         # text = re.sub("[^A-Za-z]+", " ", text)  # Remove special characters and numbers
         if remove_stopwords:
@@ -64,24 +66,24 @@ def preprocess_data(columnToClean: str, cleanedColumnName: str, selected_subject
 
     # Save the filtered DataFrame to a CSV file
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"filtered_data_{timestamp}.csv"
+    filename = f"filtered_data_5_clusters_{timestamp}.csv"
 
     filtered_data.to_csv(filename, index=False)
 
     return filtered_data
 
 # List of selected subjects
-selected_subjects = ["DB", "NI", "CR", "CV"]
+selected_subjects = ["DB", "NI", "CR", "CV", "IT"]    # , "CR", "CV", "IT"
 columnToClean='combined_text'
 cleanedColumnName='cleaned'
 numClusters = len(selected_subjects)
 
 # Preprocess data
-filtered_data = preprocess_data(columnToClean=columnToClean,
-                                cleanedColumnName=cleanedColumnName,
-                                selected_subjects=selected_subjects)
+# filtered_data = preprocess_data(columnToClean=columnToClean,
+#                                 cleanedColumnName=cleanedColumnName,
+#                                 selected_subjects=selected_subjects)
 
-# filtered_data = pd.read_csv('C:/Users/Jakne/Desktop/Andre/DA_Additional_Assignment/filtered_data.csv')
+filtered_data = pd.read_csv('C:/Users/Jakne/Desktop/Andre/filtered_data_5_clusters_2023-12-29_18-58-23.csv')
 
 from sklearn.preprocessing import LabelEncoder
 
@@ -93,7 +95,9 @@ vectorizer = TfidfVectorizer(sublinear_tf=True, min_df=5, max_df=0.80)
 
 X_tfidf = vectorizer.fit_transform(filtered_data[cleanedColumnName])
 
-from utils import fit_and_evaluate_km, fitAndEvaluateGM, printGMClusterTerms
+from utils import (fit_and_evaluate_km, fitAndEvaluateGM, printGMClusterTerms,
+                   findOptimalClusters, findOptimalClustersGMM,
+                   findOptimalClustersKMeans)
 
 from sklearn.decomposition import TruncatedSVD
 from sklearn.pipeline import make_pipeline
@@ -108,17 +112,101 @@ explained_variance = lsa[0].explained_variance_ratio_.sum()
 print(f"LSA done in {time() - t0:.3f} s")
 print(f"Explained variance of the SVD step: {explained_variance * 100:.1f}%")
 
-# kmeans = KMeans(
-#     n_clusters=numClusters,
-#     max_iter=100,
-#     n_init=1,
-# )
+# findOptimalClustersKMeans(X_lsa, maxClusters=10)
+
+# findOptimalClustersGMM(X_lsa, max_clusters=10)
+
+# todo use gridsearchCV
+# optimal_clusters = findOptimalClusters(X_lsa, max_clusters=10, nRuns=7)
 
 gm = GaussianMixture(
     n_components=numClusters,
     max_iter=100,
     n_init=30,
 )
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+from sklearn.mixture import GaussianMixture
+
+gm.fit(X_lsa)
+
+# Assuming 'gm' is your fitted GaussianMixture model and 'X' is your data
+probabilities = gm.predict_proba(X_lsa)
+
+# def plot_cluster_heatmap(probabilities):
+    # """
+    # Plot a heatmap of document-cluster probabilities.
+
+    # Args:
+    #     probabilities (np.ndarray): Probabilities of documents belonging to each cluster.
+    # """
+    # plt.figure(figsize=(12, 8))
+    # sns.heatmap(probabilities, cmap='viridis')
+    # plt.title("Heatmap of Document-Cluster Probabilities")
+    # plt.ylabel("Document Index")
+    # plt.xlabel("Cluster Index")
+    # plt.show()
+
+# probabilities: 1773 x 5
+# mostly ~=1's and ~=0's
+# the heat map does not show anything!
+    
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+import numpy as np
+
+def plot_cluster_heatmap_enhanced(probabilities):
+    """
+    Plot a heatmap of document-cluster probabilities with enhancements.
+
+    Args:
+        probabilities (np.ndarray): Probabilities of documents belonging to each cluster.
+    """
+    plt.figure(figsize=(12, 8))
+    
+    # Apply a log transformation (adding a small value to avoid log(0))
+    log_probabilities = np.log(probabilities + 1e-10)
+
+    # Use a diverging color palette
+    sns.heatmap(log_probabilities, cmap='coolwarm', center=0)
+    plt.title("Enhanced Heatmap of Document-Cluster Probabilities")
+    plt.ylabel("Document Index")
+    plt.xlabel("Cluster Index")
+    plt.show()
+
+# Call the enhanced plotting function
+# plot_cluster_heatmap_enhanced(probabilities)
+    
+def plot_cluster_heatmap_filtered(probabilities, lower_bound=0.05, upper_bound=0.95):
+    """
+    Plot a heatmap of document-cluster probabilities, excluding values close to 0 or 1.
+
+    Args:
+        probabilities (np.ndarray): Probabilities of documents belonging to each cluster.
+        lower_bound (float): Lower bound for filtering probabilities.
+        upper_bound (float): Upper bound for filtering probabilities.
+    """
+    # Create a mask for values close to 0 or 1
+    mask = np.logical_or(probabilities <= lower_bound, probabilities >= upper_bound)
+
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(probabilities, mask=mask, cmap='viridis')
+    plt.title("Filtered Heatmap of Document-Cluster Probabilities")
+    plt.ylabel("Document Index")
+    plt.xlabel("Cluster Index")
+    plt.show()
+    a = 1
+
+# 513, 
+
+# Call the function with the probabilities
+plot_cluster_heatmap_filtered(probabilities, 0.005, 0.995)
+
+# plot_cluster_heatmap(probabilities)
 
 fitAndEvaluateGM(gm, X_lsa, labels=true_labels,
                  name="gm\nwith LSA on tf-idf vectors")
