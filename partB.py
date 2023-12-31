@@ -201,12 +201,8 @@ def plot_cluster_heatmap_filtered(probabilities, lower_bound=0.05, upper_bound=0
     plt.show()
     a = 1
 
-# 513, 
-
 # Call the function with the probabilities
 plot_cluster_heatmap_filtered(probabilities, 0.005, 0.995)
-
-# plot_cluster_heatmap(probabilities)
 
 fitAndEvaluateGM(gm, X_lsa, labels=true_labels,
                  name="gm\nwith LSA on tf-idf vectors")
