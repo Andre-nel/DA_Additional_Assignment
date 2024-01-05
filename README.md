@@ -33,3 +33,7 @@ The data which have been assigned secondary clusters should have a different col
 - present the results
     - clusters
     - articles with secondary clusters
+
+Compare how they were grouped/categorised and how they are now, similar, overlapping, what are the major changes, combinations?
+
+preprocess, split into groups of 10000 lines and then concat afterwards

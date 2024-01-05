@@ -1,8 +1,9 @@
+from typing import List, Tuple
+from multiprocessing import Pool
 from itertools import product
 from scipy.optimize import minimize
 from concurrent.futures import ProcessPoolExecutor
 from sklearn.cluster import KMeans
-from typing import Tuple, List
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.mixture import GaussianMixture
@@ -20,7 +21,201 @@ nltk.download('punkt')
 english_stopwords = set(stopwords.words('english'))
 
 
-def preprocess_data(data, columnToClean: str, cleanedColumnName: str,
+def preprocessData(data: pd.DataFrame, columnToClean: str, cleanedColumnName: str,
+                   selectedSubjects: List[str], numClusters: int) -> pd.DataFrame:
+    """
+    Preprocesses a DataFrame by filtering it by selected subjects and cleaning text in parallel.
+
+    Args:
+        data (pd.DataFrame): The DataFrame to preprocess.
+        columnToClean (str): The name of the column containing text to clean.
+        cleanedColumnName (str): The name of the column to store cleaned text.
+        selectedSubjects (List[str]): Subjects to filter the DataFrame.
+        numClusters (int): Number of clusters for naming the output file.
+
+    Returns:
+        pd.DataFrame: The preprocessed DataFrame.
+    """
+    # Filter data by selected subjects
+    data = data[data['Subject_area'].isin(
+        selectedSubjects)] if selectedSubjects else data.copy()
+
+    data = data.rename(
+        columns={columnToClean: cleanedColumnName})
+
+    # Optimize DataFrame memory usage
+    data = dropColumnsNotInList(
+        data, ['ID', 'Subject_area', cleanedColumnName])
+
+    # Split dataframe for multiprocessing
+    # Adjust number of partitions based on DataFrame size
+    numPartitions = min(10, len(data))
+    dfSplit = np.array_split(data, numPartitions)
+
+    # Initialize multiprocessing pool
+    try:
+        pool = Pool()
+        partialPreprocessAndClean = functools.partial(
+            preprocessAndClean, cleanedColumnName)
+        dfProcessed: pd.DataFrame = pd.concat(
+            pool.map(partialPreprocessAndClean, dfSplit))
+    finally:
+        pool.close()
+        pool.join()
+
+    # Save the filtered DataFrame to a CSV file
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"./filtered_data/{numClusters}_clusters_{timestamp}.csv"
+    dfProcessed.to_csv(filename, index=False)
+
+    return dfProcessed
+
+
+def preprocessAndClean(cleanedColumnName: str, df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Cleans a specific column in a chunk of DataFrame.
+
+    Args:
+        cleanedColumnName (str): Column name for cleaned text also the column to clean.
+        df (pd.DataFrame): DataFrame chunk to process.
+
+    Returns:
+        pd.DataFrame: Processed DataFrame chunk.
+    """
+    df[cleanedColumnName] = df[cleanedColumnName].apply(
+        lambda x: preprocessText(x))
+    return df
+
+
+def preprocessText(text: str, removeStopwords: bool = True) -> str:
+    """
+    Preprocesses text by removing unwanted characters and optionally stopwords.
+
+    Args:
+        text (str): The text to preprocess.
+        removeStopwords (bool): Flag to indicate if stopwords should be removed.
+
+    Returns:
+        str: The preprocessed text.
+    """
+    text = re.sub(r"http\S+", "", text)  # Remove links
+    if removeStopwords:
+        tokens = nltk.word_tokenize(text)
+        tokens = [w for w in tokens if not w.lower()
+                  in stopwords.words("english")]
+        text = " ".join(tokens)
+    return text.lower().strip()
+
+
+def dropColumnsNotInList(df: pd.DataFrame, columns_to_keep: List[str]) -> pd.DataFrame:
+    """
+    Drops columns from a DataFrame that are not in the specified list.
+
+    Args:
+        df (pd.DataFrame): The DataFrame from which to drop columns.
+        columns_to_keep (List[str]): A list of column names to keep.
+
+    Returns:
+        pd.DataFrame: The DataFrame with only the specified columns retained.
+
+    Raises:
+        ValueError: If any of the columns in `columns_to_keep` do not exist in `df`.
+
+    """
+    # Check if all columns to keep are in the DataFrame
+    for column in columns_to_keep:
+        if column not in df.columns:
+            raise ValueError(f"Column '{column}' not found in DataFrame.")
+
+    # Determine which columns to drop
+    columns_to_drop = df.columns.difference(columns_to_keep)
+
+    # Drop the unwanted columns
+    df_dropped = df.drop(columns=columns_to_drop)
+
+    return df_dropped
+
+# def preprocess_data(data: pd.DataFrame, columnToClean: str, cleanedColumnName: str,
+#                     selected_subjects: List[str], numClusters: int) -> pd.DataFrame:
+#     """
+#     Filter it by selected subjects, and preprocess the text in parallel using multiprocessing.
+
+#     Args:
+#         data (pd.DataFrame): Input DataFrame.
+#         columnToClean (str): The name of the column to clean.
+#         cleanedColumnName (str): The name of the column to store cleaned data.
+#         selected_subjects (List[str]): List of subject areas to filter the data.
+#         numClusters (int): Number of clusters for naming the output file.
+
+#     Returns:
+#         pd.DataFrame: Preprocessed DataFrame.
+#     """
+#     # Filter data by selected subjects
+#     if selected_subjects:
+#         filtered_data = data[data['Subject_area'].isin(selected_subjects)]
+#     else:
+#         filtered_data = data.copy()
+
+#     # Split dataframe for multiprocessing
+#     num_partitions = 10  # Number of partitions to split dataframe
+#     df_split = np.array_split(filtered_data, num_partitions)
+
+#     pool = Pool()
+#     partial_preprocess_and_clean = functools.partial(preprocess_and_clean,
+#                                                      cleanedColumnName,
+#                                                      columnToClean)
+#     df_processed = pd.concat(pool.map(partial_preprocess_and_clean, df_split))
+#     pool.close()
+#     pool.join()
+
+#     # Save the filtered DataFrame to a CSV file
+#     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+#     filename = f"./filtered_data/{numClusters}_clusters_{timestamp}.csv"
+#     df_processed.to_csv(filename, index=False)
+
+#     return df_processed
+
+
+# def preprocess_and_clean(cleanedColumnName: str, columnToClean: str, df: pd.DataFrame) -> pd.DataFrame:
+#     """
+#     Preprocess and clean a chunk of DataFrame.
+
+#     Args:
+#         df (pd.DataFrame): Chunk of DataFrame to preprocess.
+
+#     Returns:
+#         pd.DataFrame: Preprocessed chunk of DataFrame.
+#     """
+#     df[cleanedColumnName] = df[columnToClean].apply(
+#         lambda x: preprocess_text(x))
+#     return df
+
+
+# def preprocess_text(text: str, remove_stopwords: bool = True) -> str:
+#     """
+#     Preprocess text by removing links, special characters, numbers, and optionally stopwords.
+
+#     Args:
+#         text (str): Input text.
+#         remove_stopwords (bool): Whether to remove stopwords (default True).
+
+#     Returns:
+#         str: Preprocessed text.
+#     """
+#     # Lemmatization did not improve the results
+
+#     text = re.sub(r"http\S+", "", text)  # Remove links
+#     # text = re.sub("[^A-Za-z]+", " ", text)  # Remove special characters and numbers
+#     if remove_stopwords:
+#         tokens = nltk.word_tokenize(text)  # Tokenize
+#         tokens = [w for w in tokens if not w.lower(
+#         ) in stopwords.words("english")]  # Remove stopwords
+#         text = " ".join(tokens)  # Join tokens
+#     text = text.lower().strip()  # Convert to lowercase and remove whitespace
+#     return text
+
+
+def preprocess_data(data: pd.DataFrame, columnToClean: str, cleanedColumnName: str,
                     selected_subjects: list, numClusters) -> pd.DataFrame:
     """
     Filter it by selected subjects, and preprocess the text.
@@ -31,9 +226,6 @@ def preprocess_data(data, columnToClean: str, cleanedColumnName: str,
     Returns:
         pd.DataFrame: Preprocessed DataFrame.
     """
-    # Filter data by selected subjects
-    filtered_data: pd.DataFrame = data[data['Subject_area'].isin(
-        selected_subjects)]
 
     # Preprocess the text
     def preprocess_text(text: str, remove_stopwords: bool = True) -> str:
@@ -60,16 +252,16 @@ def preprocess_data(data, columnToClean: str, cleanedColumnName: str,
         return text
 
     # Apply text preprocessing to the column to clean
-    filtered_data[cleanedColumnName] = filtered_data[columnToClean].apply(
+    data[cleanedColumnName] = data[columnToClean].apply(
         lambda x: preprocess_text(x, remove_stopwords=True))
 
     # Save the filtered DataFrame to a CSV file
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     filename = f"./filtered_data/{numClusters}_clusters_{timestamp}.csv"
 
-    filtered_data.to_csv(filename, index=False)
+    data.to_csv(filename, index=False)
 
-    return filtered_data
+    return data
 
 
 def evaluate_gmm_cluster(data, n_clusters, run):
@@ -95,7 +287,8 @@ def evaluate_combinations(args: Tuple):
 
 
 def find_optimal_clusters_silhouette(data: np.ndarray, max_clusters=20,
-                                     actualOptimalClusters: int = None, n_runs=5):
+                                     actualOptimalClusters: int = None, n_runs=5,
+                                     min_clusters: int = 2):
     """
     Determine the optimal number of clusters using averaged performance metrics over multiple runs.
     """
@@ -104,7 +297,7 @@ def find_optimal_clusters_silhouette(data: np.ndarray, max_clusters=20,
     avg_bic_scores = []
 
     with ProcessPoolExecutor() as executor:
-        for n_clusters in range(2, max_clusters + 1):
+        for n_clusters in range(min_clusters, max_clusters + 1):
             print(f"Processing {n_clusters} clusters...")
 
             # Create all combinations of n_clusters and runs
@@ -128,7 +321,8 @@ def find_optimal_clusters_silhouette(data: np.ndarray, max_clusters=20,
     # Plotting the results
     plt.figure(figsize=(12, 4))
     plt.subplot(1, 3, 1)
-    plt.plot(range(2, max_clusters + 1), avg_silhouette_scores, marker='o')
+    plt.plot(range(min_clusters, max_clusters + 1),
+             avg_silhouette_scores, marker='o')
     if actualOptimalClusters is not None:
         plt.axvline(x=actualOptimalClusters, color='blue',
                     linestyle='--',
@@ -138,13 +332,13 @@ def find_optimal_clusters_silhouette(data: np.ndarray, max_clusters=20,
     plt.title('Average Silhouette Score vs. Number of Clusters')
 
     plt.subplot(1, 3, 2)
-    plt.plot(range(2, max_clusters + 1), avg_aic_scores, marker='o')
+    plt.plot(range(min_clusters, max_clusters + 1), avg_aic_scores, marker='o')
     plt.xlabel('Number of clusters')
     plt.ylabel('Average AIC Score')
     plt.title('Average AIC vs. Number of Clusters')
 
     plt.subplot(1, 3, 3)
-    plt.plot(range(2, max_clusters + 1), avg_bic_scores, marker='o')
+    plt.plot(range(min_clusters, max_clusters + 1), avg_bic_scores, marker='o')
     plt.xlabel('Number of clusters')
     plt.ylabel('Average BIC Score')
     plt.title('Average BIC vs. Number of Clusters')
@@ -155,11 +349,11 @@ def find_optimal_clusters_silhouette(data: np.ndarray, max_clusters=20,
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     filename = f"optimalClusters/Silhouette_{timestamp}.png"
     plt.savefig(filename)
-    plt.show()
+    # plt.show()
 
     # Choosing the optimal number of clusters based on the highest average silhouette score
     optimal_clusters = range(
-        2, max_clusters + 1)[np.argmax(avg_silhouette_scores)]
+        min_clusters, max_clusters + 1)[np.argmax(avg_silhouette_scores)]
     print(
         f"Optimal number of clusters based on average Silhouette Score: {optimal_clusters}")
 
@@ -183,7 +377,9 @@ def fit_gmm(X: np.array, n_clusters: int) -> float:
 
 
 def optimal_clusters_gmm_modified_elbow(X: np.array, max_clusters: int,
-                                        actualOptimalClusters: int = None, plot: bool = True) -> Tuple[int, List[float], str]:
+                                        actualOptimalClusters: int = None,
+                                        plot: bool = True,
+                                        min_clusters: int = 2) -> Tuple[int, List[float], str]:
     """
     Determine the optimal number of clusters using a modified elbow method for Gaussian Mixture Models.
 
@@ -198,7 +394,7 @@ def optimal_clusters_gmm_modified_elbow(X: np.array, max_clusters: int,
     if max_clusters < 1:
         raise ValueError("maxClusters must be a positive integer")
 
-    rangeClusters = range(1, max_clusters + 1)
+    rangeClusters = range(min_clusters, max_clusters + 1)
 
     with ProcessPoolExecutor(max_workers=8) as executor:
         partial_fit_gmm = functools.partial(fit_gmm, X)
@@ -216,7 +412,7 @@ def optimal_clusters_gmm_modified_elbow(X: np.array, max_clusters: int,
         second_derivative = np.diff(first_derivative)
 
         # Find the elbow point as the first point of maximum curvature
-        optimalClusters = np.argmax(second_derivative) + 1
+        optimalClusters = np.argmax(second_derivative) + min_clusters
 
     filename = ""
     if plot:
@@ -235,36 +431,9 @@ def optimal_clusters_gmm_modified_elbow(X: np.array, max_clusters: int,
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         filename = f"optimalClusters/logLikelihood_{timestamp}.png"
         plt.savefig(filename)
-        plt.show()
+        # plt.show()
 
     return optimalClusters, logLikelihoods, filename
-
-
-# def find_elbow_point(wcss: List[float]) -> int:
-#     """
-#     Find the elbow point in the WCSS (within-cluster sum of squares) curve.
-
-#     Args:
-#         wcss (List[float]): List of WCSS values for different numbers of clusters.
-
-#     Returns:
-#         int: Optimal number of clusters based on the elbow method.
-#     """
-#     if len(wcss) <= 2:
-#         return len(wcss)
-
-#     # Smooth the WCSS values using a simple moving average
-#     window_size = 3
-#     smoothed_wcss = np.convolve(wcss, np.ones(
-#         window_size) / window_size, mode='valid')
-
-#     # Calculate the second derivative
-#     second_derivative = np.diff(smoothed_wcss, n=2)
-
-#     # Find the elbow point
-#     elbow_point = np.argmax(second_derivative) + 1 + (window_size - 1) // 2
-
-#     return elbow_point
 
 
 def find_elbow_point(wcss: List[float]) -> int:
@@ -315,7 +484,9 @@ def fit_kmeans(X: np.ndarray, n_clusters: int) -> float:
 
 
 def find_optimal_clusters_kmeans(X: np.ndarray, max_clusters: int,
-                                 actualOptimalClusters: int = None, plot: bool = True) -> Tuple[int, List[float], str]:
+                                 actualOptimalClusters: int = None,
+                                 plot: bool = True,
+                                 min_clusters: int = 2) -> Tuple[int, List[float], str]:
     """
     Determine the optimal number of clusters for K-Means using a modified elbow method.
 
@@ -330,7 +501,7 @@ def find_optimal_clusters_kmeans(X: np.ndarray, max_clusters: int,
     if max_clusters < 1:
         raise ValueError("maxClusters must be at least 1.")
 
-    rangeClusters = range(1, max_clusters + 1)
+    rangeClusters = range(min_clusters, max_clusters + 1)
 
     with ProcessPoolExecutor() as executor:
         # Create a partial function with X already passed
@@ -340,7 +511,7 @@ def find_optimal_clusters_kmeans(X: np.ndarray, max_clusters: int,
         wcss = list(executor.map(partial_fit_kmeans, rangeClusters))
 
     # Automated Elbow Detection
-    optimalClusters = find_elbow_point(wcss)
+    optimalClusters = find_elbow_point(wcss) + min_clusters
 
     filename = ""
     if plot:
@@ -359,6 +530,33 @@ def find_optimal_clusters_kmeans(X: np.ndarray, max_clusters: int,
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         filename = f"optimalClusters/KMeans_elbow_method_{timestamp}.png"
         plt.savefig(filename)
-        plt.show()
+        # plt.show()
 
     return optimalClusters, wcss, filename
+
+
+# def find_elbow_point(wcss: List[float]) -> int:
+#     """
+#     Find the elbow point in the WCSS (within-cluster sum of squares) curve.
+
+#     Args:
+#         wcss (List[float]): List of WCSS values for different numbers of clusters.
+
+#     Returns:
+#         int: Optimal number of clusters based on the elbow method.
+#     """
+#     if len(wcss) <= 2:
+#         return len(wcss)
+
+#     # Smooth the WCSS values using a simple moving average
+#     window_size = 3
+#     smoothed_wcss = np.convolve(wcss, np.ones(
+#         window_size) / window_size, mode='valid')
+
+#     # Calculate the second derivative
+#     second_derivative = np.diff(smoothed_wcss, n=2)
+
+#     # Find the elbow point
+#     elbow_point = np.argmax(second_derivative) + 1 + (window_size - 1) // 2
+
+#     return elbow_point

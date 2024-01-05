@@ -1,3 +1,11 @@
+import numpy as np
+from time import time
+from sklearn.preprocessing import Normalizer
+from sklearn.pipeline import make_pipeline
+from sklearn.decomposition import TruncatedSVD
+from utils import (fit_and_evaluate_km, fitAndEvaluateGM, printGMClusterTerms,
+                   findOptimalClusters, findOptimalClustersGMM,
+                   findOptimalClustersKMeans)
 import pandas as pd
 import re
 import nltk
@@ -18,7 +26,8 @@ english_stopwords = set(stopwords.words('english'))
 
 
 # Read the CSV file
-data = pd.read_csv('C:/Users/Jakne/Desktop/Andre/DA_Additional_Assignment/arxiv2017.csv', delimiter=';', nrows=5000)
+data = pd.read_csv(
+    'C:/Users/Jakne/Desktop/Andre/DA_Additional_Assignment/arxiv2017.csv', delimiter=';', nrows=5000)
 
 # Add the 'Title' column to the 'Abstract' column and store it in a new column 'combined_text'
 data['combined_text'] = data['Title'] + ' ' + data['Abstract']
@@ -27,10 +36,10 @@ data['combined_text'] = data['Title'] + ' ' + data['Abstract']
 def preprocess_data(columnToClean: str, cleanedColumnName: str, selected_subjects: list) -> pd.DataFrame:
     """
     Filter it by selected subjects, and preprocess the text.
-    
+
     Args:
         selected_subjects (list): List of subject areas to filter the data.
-        
+
     Returns:
         pd.DataFrame: Preprocessed DataFrame.
     """
@@ -41,11 +50,11 @@ def preprocess_data(columnToClean: str, cleanedColumnName: str, selected_subject
     def preprocess_text(text: str, remove_stopwords: bool = True) -> str:
         """
         Preprocess text by removing links, special characters, numbers, and optionally stopwords.
-        
+
         Args:
             text (str): Input text.
             remove_stopwords (bool): Whether to remove stopwords (default True).
-            
+
         Returns:
             str: Preprocessed text.
         """
@@ -55,7 +64,8 @@ def preprocess_data(columnToClean: str, cleanedColumnName: str, selected_subject
         # text = re.sub("[^A-Za-z]+", " ", text)  # Remove special characters and numbers
         if remove_stopwords:
             tokens = nltk.word_tokenize(text)  # Tokenize
-            tokens = [w for w in tokens if not w.lower() in stopwords.words("english")]  # Remove stopwords
+            tokens = [w for w in tokens if not w.lower(
+            ) in stopwords.words("english")]  # Remove stopwords
             text = " ".join(tokens)  # Join tokens
         text = text.lower().strip()  # Convert to lowercase and remove whitespace
         return text
@@ -72,10 +82,11 @@ def preprocess_data(columnToClean: str, cleanedColumnName: str, selected_subject
 
     return filtered_data
 
+
 # List of selected subjects
 selected_subjects = ["DB", "NI", "CR", "CV", "IT"]    # , "CR", "CV", "IT"
-columnToClean='combined_text'
-cleanedColumnName='cleaned'
+columnToClean = 'combined_text'
+cleanedColumnName = 'cleaned'
 numClusters = len(selected_subjects)
 
 # Preprocess data
@@ -83,9 +94,9 @@ numClusters = len(selected_subjects)
 #                                 cleanedColumnName=cleanedColumnName,
 #                                 selected_subjects=selected_subjects)
 
-filtered_data = pd.read_csv('C:/Users/Jakne/Desktop/Andre/filtered_data_5_clusters_2023-12-29_18-58-23.csv')
+filtered_data = pd.read_csv(
+    'C:/Users/Jakne/Desktop/Andre/filtered_data_5_clusters_2023-12-29_18-58-23.csv')
 
-from sklearn.preprocessing import LabelEncoder
 
 label_encoder = LabelEncoder()
 true_labels = label_encoder.fit_transform(filtered_data['Subject_area'])
@@ -95,14 +106,6 @@ vectorizer = TfidfVectorizer(sublinear_tf=True, min_df=5, max_df=0.80)
 
 X_tfidf = vectorizer.fit_transform(filtered_data[cleanedColumnName])
 
-from utils import (fit_and_evaluate_km, fitAndEvaluateGM, printGMClusterTerms,
-                   findOptimalClusters, findOptimalClustersGMM,
-                   findOptimalClustersKMeans)
-
-from sklearn.decomposition import TruncatedSVD
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import Normalizer
-from time import time
 
 lsa = make_pipeline(TruncatedSVD(n_components=100), Normalizer(copy=False))
 t0 = time()
@@ -125,23 +128,19 @@ gm = GaussianMixture(
     n_init=30,
 )
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
-from sklearn.mixture import GaussianMixture
 
 gm.fit(X_lsa)
 
 # Assuming 'gm' is your fitted GaussianMixture model and 'X' is your data
 probabilities = gm.predict_proba(X_lsa)
 
-# def plot_cluster_heatmap(probabilities):
-    # """
+"""# def plot_cluster_heatmap(probabilities):
+    # 
     # Plot a heatmap of document-cluster probabilities.
 
     # Args:
     #     probabilities (np.ndarray): Probabilities of documents belonging to each cluster.
-    # """
+    # 
     # plt.figure(figsize=(12, 8))
     # sns.heatmap(probabilities, cmap='viridis')
     # plt.title("Heatmap of Document-Cluster Probabilities")
@@ -152,12 +151,8 @@ probabilities = gm.predict_proba(X_lsa)
 # probabilities: 1773 x 5
 # mostly ~=1's and ~=0's
 # the heat map does not show anything!
-    
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+"""
 
-import numpy as np
 
 def plot_cluster_heatmap_enhanced(probabilities):
     """
@@ -167,7 +162,7 @@ def plot_cluster_heatmap_enhanced(probabilities):
         probabilities (np.ndarray): Probabilities of documents belonging to each cluster.
     """
     plt.figure(figsize=(12, 8))
-    
+
     # Apply a log transformation (adding a small value to avoid log(0))
     log_probabilities = np.log(probabilities + 1e-10)
 
@@ -180,7 +175,8 @@ def plot_cluster_heatmap_enhanced(probabilities):
 
 # Call the enhanced plotting function
 # plot_cluster_heatmap_enhanced(probabilities)
-    
+
+
 def plot_cluster_heatmap_filtered(probabilities, lower_bound=0.05, upper_bound=0.95):
     """
     Plot a heatmap of document-cluster probabilities, excluding values close to 0 or 1.
@@ -191,7 +187,8 @@ def plot_cluster_heatmap_filtered(probabilities, lower_bound=0.05, upper_bound=0
         upper_bound (float): Upper bound for filtering probabilities.
     """
     # Create a mask for values close to 0 or 1
-    mask = np.logical_or(probabilities <= lower_bound, probabilities >= upper_bound)
+    mask = np.logical_or(probabilities <= lower_bound,
+                         probabilities >= upper_bound)
 
     plt.figure(figsize=(12, 8))
     sns.heatmap(probabilities, mask=mask, cmap='viridis')
@@ -200,6 +197,7 @@ def plot_cluster_heatmap_filtered(probabilities, lower_bound=0.05, upper_bound=0
     plt.xlabel("Cluster Index")
     plt.show()
     a = 1
+
 
 # Call the function with the probabilities
 plot_cluster_heatmap_filtered(probabilities, 0.005, 0.995)
